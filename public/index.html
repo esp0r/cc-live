@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>cc-live Dashboard</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+      background: #0d1117;
+      color: #c9d1d9;
+      height: 100vh;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* Login overlay */
+    #login-overlay {
+      position: fixed; inset: 0;
+      background: #0d1117;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000;
+    }
+    #login-overlay.hidden { display: none; }
+    .login-box {
+      text-align: center;
+      padding: 2rem;
+    }
+    .login-box h1 { font-size: 1.5rem; margin-bottom: 1rem; color: #58a6ff; }
+    .login-box input {
+      padding: 0.6rem 1rem; width: 280px;
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      color: #c9d1d9; font-size: 1rem; outline: none;
+    }
+    .login-box input:focus { border-color: #58a6ff; }
+    .login-box button {
+      margin-left: 0.5rem; padding: 0.6rem 1.2rem;
+      background: #238636; border: none; border-radius: 6px;
+      color: #fff; font-size: 1rem; cursor: pointer;
+    }
+    .login-box button:hover { background: #2ea043; }
+    .login-error { color: #f85149; margin-top: 0.5rem; font-size: 0.85rem; }
+
+    /* Sidebar */
+    #sidebar {
+      width: 280px; min-width: 280px;
+      background: #161b22;
+      border-right: 1px solid #30363d;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .sidebar-header {
+      padding: 1rem;
+      border-bottom: 1px solid #30363d;
+      font-size: 0.9rem; font-weight: 600; color: #58a6ff;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .session-count {
+      background: #30363d; border-radius: 10px;
+      padding: 0.1rem 0.5rem; font-size: 0.75rem; color: #8b949e;
+    }
+    #session-list {
+      flex: 1; overflow-y: auto; padding: 0.5rem;
+    }
+    .session-item {
+      padding: 0.7rem 0.8rem; margin-bottom: 0.3rem;
+      border-radius: 6px; cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.15s;
+    }
+    .session-item:hover { background: #1c2128; }
+    .session-item.active { background: #1c2128; border-color: #58a6ff; }
+    .session-hostname {
+      font-weight: 600; font-size: 0.85rem; color: #c9d1d9;
+      display: flex; align-items: center; gap: 0.4rem;
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #3fb950; display: inline-block; flex-shrink: 0;
+    }
+    .session-cwd {
+      font-size: 0.75rem; color: #8b949e;
+      margin-top: 0.2rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .session-meta {
+      font-size: 0.7rem; color: #6e7681; margin-top: 0.3rem;
+      display: flex; gap: 0.8rem;
+    }
+
+    /* No sessions placeholder */
+    .no-sessions {
+      text-align: center; padding: 2rem 1rem; color: #6e7681;
+    }
+    .no-sessions-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+
+    /* Main area */
+    #main {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    /* Tab bar */
+    #tab-bar {
+      display: flex; background: #161b22;
+      border-bottom: 1px solid #30363d;
+      min-height: 36px; overflow-x: auto;
+    }
+    .tab {
+      padding: 0.5rem 1rem; font-size: 0.8rem;
+      cursor: pointer; border-right: 1px solid #30363d;
+      white-space: nowrap; display: flex; align-items: center; gap: 0.5rem;
+      color: #8b949e; transition: background 0.15s;
+    }
+    .tab:hover { background: #1c2128; }
+    .tab.active { background: #0d1117; color: #c9d1d9; border-bottom: 2px solid #58a6ff; }
+    .tab-close {
+      font-size: 0.7rem; opacity: 0.5; padding: 2px 4px; border-radius: 3px;
+    }
+    .tab-close:hover { opacity: 1; background: #30363d; }
+
+    /* Terminal area */
+    #terminal-area {
+      flex: 1; position: relative; background: #1e1e1e;
+    }
+    .terminal-container {
+      position: absolute; inset: 0; padding: 4px;
+      display: none;
+    }
+    .terminal-container.active { display: block; }
+
+    /* Empty state */
+    #empty-state {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: #6e7681; font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+
+<div id="login-overlay">
+  <div class="login-box">
+    <h1>cc-live Dashboard</h1>
+    <div>
+      <input id="token-input" type="password" placeholder="Enter token..." />
+      <button id="login-btn">Connect</button>
+    </div>
+    <div id="login-error" class="login-error"></div>
+  </div>
+</div>
+
+<div id="sidebar">
+  <div class="sidebar-header">
+    Sessions <span id="session-count" class="session-count">0</span>
+  </div>
+  <div id="session-list">
+    <div class="no-sessions" id="no-sessions">
+      <div class="no-sessions-icon">&#9671;</div>
+      No active sessions
+    </div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="tab-bar"></div>
+  <div id="terminal-area">
+    <div id="empty-state">Select a session from the sidebar</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+<script>
+(function() {
+  // State
+  let socket = null;
+  let sessions = new Map(); // sessionId -> session info
+  let tabs = new Map();     // sessionId -> { term, fitAddon, container }
+  let activeTab = null;
+
+  // DOM refs
+  const loginOverlay = document.getElementById('login-overlay');
+  const tokenInput = document.getElementById('token-input');
+  const loginBtn = document.getElementById('login-btn');
+  const loginError = document.getElementById('login-error');
+  const sessionList = document.getElementById('session-list');
+  const sessionCount = document.getElementById('session-count');
+  const noSessions = document.getElementById('no-sessions');
+  const tabBar = document.getElementById('tab-bar');
+  const terminalArea = document.getElementById('terminal-area');
+  const emptyState = document.getElementById('empty-state');
+
+  // Check URL token
+  const urlToken = new URLSearchParams(location.search).get('token');
+  if (urlToken) {
+    sessionStorage.setItem('cc-live-token', urlToken);
+    // Clean URL
+    history.replaceState(null, '', location.pathname);
+  }
+
+  const savedToken = sessionStorage.getItem('cc-live-token');
+  if (savedToken) {
+    connect(savedToken);
+  }
+
+  loginBtn.onclick = () => {
+    const token = tokenInput.value.trim();
+    if (!token) return;
+    connect(token);
+  };
+  tokenInput.onkeydown = (e) => {
+    if (e.key === 'Enter') loginBtn.onclick();
+  };
+
+  function connect(token) {
+    loginError.textContent = '';
+    if (socket) socket.disconnect();
+
+    socket = io('/viewer', {
+      auth: { token },
+      transports: ['websocket'],
+    });
+
+    socket.on('connect', () => {
+      sessionStorage.setItem('cc-live-token', token);
+      loginOverlay.classList.add('hidden');
+      socket.emit('list-sessions', (list) => {
+        sessions.clear();
+        list.forEach(s => sessions.set(s.sessionId, s));
+        renderSessionList();
+      });
+    });
+
+    socket.on('connect_error', (err) => {
+      loginError.textContent = 'Connection failed: ' + err.message;
+      loginOverlay.classList.remove('hidden');
+    });
+
+    socket.on('session-added', (s) => {
+      sessions.set(s.sessionId, s);
+      renderSessionList();
+    });
+
+    socket.on('session-removed', ({ sessionId }) => {
+      sessions.delete(sessionId);
+      renderSessionList();
+      // Mark tab as disconnected but keep it open
+      const tab = tabs.get(sessionId);
+      if (tab) {
+        tab.term.write('\r\n\x1b[33m--- session ended ---\x1b[0m\r\n');
+      }
+    });
+
+    socket.on('scrollback', ({ sessionId, data }) => {
+      const tab = tabs.get(sessionId);
+      if (tab) tab.term.write(data);
+    });
+
+    socket.on('session-output', ({ sessionId, data }) => {
+      const tab = tabs.get(sessionId);
+      if (tab) tab.term.write(data);
+    });
+
+    socket.on('session-resize', ({ sessionId, cols, rows }) => {
+      const tab = tabs.get(sessionId);
+      if (tab) {
+        tab.term.resize(cols, rows);
+      }
+    });
+  }
+
+  function renderSessionList() {
+    sessionCount.textContent = sessions.size;
+    if (sessions.size === 0) {
+      noSessions.style.display = '';
+      // Clear all items except noSessions
+      Array.from(sessionList.children).forEach(c => {
+        if (c !== noSessions) c.remove();
+      });
+      return;
+    }
+    noSessions.style.display = 'none';
+
+    // Remove stale items
+    Array.from(sessionList.querySelectorAll('.session-item')).forEach(el => {
+      if (!sessions.has(el.dataset.id)) el.remove();
+    });
+
+    // Add/update items
+    sessions.forEach((s, id) => {
+      let el = sessionList.querySelector(`.session-item[data-id="${id}"]`);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'session-item';
+        el.dataset.id = id;
+        el.onclick = () => openTab(id);
+        sessionList.appendChild(el);
+      }
+      el.classList.toggle('active', activeTab === id);
+
+      const dur = formatDuration(Date.now() - s.connectedAt);
+      const shortCwd = s.cwd.replace(/^\/home\/[^/]+/, '~');
+      el.innerHTML = `
+        <div class="session-hostname">
+          <span class="status-dot"></span>
+          ${escHtml(s.hostname)}
+        </div>
+        <div class="session-cwd" title="${escHtml(s.cwd)}">${escHtml(shortCwd)}</div>
+        <div class="session-meta">
+          <span>${dur}</span>
+          <span>${s.viewerCount || 0} viewers</span>
+        </div>
+      `;
+    });
+  }
+
+  function openTab(sessionId) {
+    if (tabs.has(sessionId)) {
+      switchTab(sessionId);
+      return;
+    }
+
+    const session = sessions.get(sessionId);
+    if (!session) return;
+
+    // Create terminal container
+    const container = document.createElement('div');
+    container.className = 'terminal-container';
+    container.dataset.id = sessionId;
+    terminalArea.appendChild(container);
+
+    const term = new Terminal({
+      theme: {
+        background: '#1e1e1e',
+        foreground: '#d4d4d4',
+        cursor: '#d4d4d4',
+        selectionBackground: '#264f78',
+        black: '#1e1e1e',
+        red: '#f44747',
+        green: '#6a9955',
+        yellow: '#d7ba7d',
+        blue: '#569cd6',
+        magenta: '#c586c0',
+        cyan: '#4ec9b0',
+        white: '#d4d4d4',
+        brightBlack: '#808080',
+        brightRed: '#f44747',
+        brightGreen: '#6a9955',
+        brightYellow: '#d7ba7d',
+        brightBlue: '#569cd6',
+        brightMagenta: '#c586c0',
+        brightCyan: '#4ec9b0',
+        brightWhite: '#d4d4d4',
+      },
+      fontSize: 14,
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      cursorBlink: true,
+      scrollback: 10000,
+      cols: session.cols || 80,
+      rows: session.rows || 24,
+    });
+
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(container);
+
+    // Send input to remote session
+    term.onData((data) => {
+      if (socket && socket.connected) {
+        socket.emit('input', { sessionId, data });
+      }
+    });
+
+    tabs.set(sessionId, { term, fitAddon, container });
+
+    // Create tab in tab bar
+    const tabEl = document.createElement('div');
+    tabEl.className = 'tab';
+    tabEl.dataset.id = sessionId;
+    tabEl.innerHTML = `
+      <span>${escHtml(session.hostname)}:${escHtml(shortPath(session.cwd))}</span>
+      <span class="tab-close" data-id="${sessionId}">&times;</span>
+    `;
+    tabEl.onclick = (e) => {
+      if (e.target.classList.contains('tab-close')) {
+        closeTab(sessionId);
+      } else {
+        switchTab(sessionId);
+      }
+    };
+    tabBar.appendChild(tabEl);
+
+    // Watch the session
+    socket.emit('watch', { sessionId });
+
+    switchTab(sessionId);
+  }
+
+  function switchTab(sessionId) {
+    activeTab = sessionId;
+    emptyState.style.display = 'none';
+
+    // Update tab bar
+    tabBar.querySelectorAll('.tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.id === sessionId);
+    });
+
+    // Update terminal containers
+    terminalArea.querySelectorAll('.terminal-container').forEach(c => {
+      c.classList.toggle('active', c.dataset.id === sessionId);
+    });
+
+    // Update sidebar
+    sessionList.querySelectorAll('.session-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.id === sessionId);
+    });
+
+    // Fit terminal
+    const tab = tabs.get(sessionId);
+    if (tab) {
+      setTimeout(() => {
+        tab.fitAddon.fit();
+        tab.term.focus();
+      }, 50);
+    }
+  }
+
+  function closeTab(sessionId) {
+    const tab = tabs.get(sessionId);
+    if (!tab) return;
+
+    socket.emit('unwatch', { sessionId });
+    tab.term.dispose();
+    tab.container.remove();
+    tabs.delete(sessionId);
+
+    // Remove tab from tab bar
+    const tabEl = tabBar.querySelector(`.tab[data-id="${sessionId}"]`);
+    if (tabEl) tabEl.remove();
+
+    // Switch to another tab or show empty state
+    if (tabs.size > 0) {
+      switchTab(tabs.keys().next().value);
+    } else {
+      activeTab = null;
+      emptyState.style.display = '';
+    }
+
+    renderSessionList();
+  }
+
+  // Resize handler
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (activeTab) {
+        const tab = tabs.get(activeTab);
+        if (tab) tab.fitAddon.fit();
+      }
+    }, 150);
+  });
+
+  // Duration timer
+  setInterval(renderSessionList, 30000);
+
+  // Helpers
+  function formatDuration(ms) {
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm';
+    const h = Math.floor(m / 60);
+    return h + 'h ' + (m % 60) + 'm';
+  }
+
+  function shortPath(p) {
+    const parts = p.split('/');
+    return parts.length > 2 ? parts.slice(-2).join('/') : p;
+  }
+
+  function escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+})();
+</script>
+</body>
+</html>
