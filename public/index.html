@@ -292,11 +292,44 @@
   let currentFontSize = isMobile() ? 7 : 14;
   const MIN_FONT = 4, MAX_FONT = 24;
 
+  // Auto-fit: adjust font size so remote session cols always fit in container width
+  function autoFit(tab) {
+    const container = tab.container;
+    const cols = tab.sessionCols;
+    const availableWidth = container.clientWidth - 8; // subtract padding
+    const availableHeight = container.clientHeight - 8;
+    if (availableWidth <= 0 || availableHeight <= 0) return;
+
+    // Measure actual monospace character width at font size 10 for accurate ratio
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.font = '10px Menlo, Monaco, "Courier New", monospace';
+    const charWidthAt10 = ctx.measureText('M').width;
+    const charWidthRatio = charWidthAt10 / 10; // width per 1px of font size
+
+    // Calculate font size that fits all cols in available width
+    const idealFontSize = Math.floor(availableWidth / (cols * charWidthRatio));
+    const newSize = Math.max(MIN_FONT, Math.min(MAX_FONT, idealFontSize));
+
+    tab.term.options.fontSize = newSize;
+    currentFontSize = newSize;
+    document.querySelectorAll('.font-size-label').forEach(el => el.textContent = newSize);
+
+    // Use fitAddon to get accurate row count at current font size, but keep session cols
+    const dims = tab.fitAddon.proposeDimensions();
+    const fittedRows = dims ? dims.rows : Math.max(1, Math.floor(availableHeight / (newSize * 1.2)));
+
+    tab.term.resize(cols, fittedRows);
+  }
+
   function updateFontSize(delta) {
     currentFontSize = Math.max(MIN_FONT, Math.min(MAX_FONT, currentFontSize + delta));
-    tabs.forEach(({ term, fitAddon }) => {
-      term.options.fontSize = currentFontSize;
-      fitAddon.fit();
+    tabs.forEach((tab) => {
+      tab.term.options.fontSize = currentFontSize;
+      // Recalculate rows at new font size, keep session cols
+      const dims = tab.fitAddon.proposeDimensions();
+      const rows = dims ? dims.rows : tab.sessionRows;
+      tab.term.resize(tab.sessionCols, rows);
     });
     // Update all labels
     document.querySelectorAll('.font-size-label').forEach(el => {
@@ -398,7 +431,9 @@
     socket.on('session-resize', ({ sessionId, cols, rows }) => {
       const tab = tabs.get(sessionId);
       if (tab) {
-        tab.term.resize(cols, rows);
+        tab.sessionCols = cols;
+        tab.sessionRows = rows;
+        autoFit(tab);
       }
     });
   }
@@ -505,7 +540,7 @@
       }
     });
 
-    tabs.set(sessionId, { term, fitAddon, container });
+    tabs.set(sessionId, { term, fitAddon, container, sessionCols: session.cols || 80, sessionRows: session.rows || 24 });
 
     // Create tab in tab bar
     const tabEl = document.createElement('div');
@@ -558,11 +593,11 @@
       el.classList.toggle('active', el.dataset.id === sessionId);
     });
 
-    // Fit terminal (longer delay on mobile to wait for sidebar animation)
+    // Auto-fit font size (longer delay on mobile to wait for sidebar animation)
     const tab = tabs.get(sessionId);
     if (tab) {
       setTimeout(() => {
-        tab.fitAddon.fit();
+        autoFit(tab);
         tab.term.focus();
       }, isMobile() ? 250 : 50);
     }
@@ -599,7 +634,7 @@
     resizeTimer = setTimeout(() => {
       if (activeTab) {
         const tab = tabs.get(activeTab);
-        if (tab) tab.fitAddon.fit();
+        if (tab) autoFit(tab);
       }
     }, 150);
   });
