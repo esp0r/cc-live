@@ -34,6 +34,7 @@ export function startProxy(config: ClientConfig, args: string[]): void {
   process.stdin.resume();
 
   // Connect to streaming server
+  process.stderr.write(`\x1b[90m[cc-live] server=${config.serverUrl} token=${config.token ? '***' : '(empty)'}\x1b[0m\n`);
   const conn = createConnection(config.serverUrl, config.token, sessionId);
 
   conn.socket.on('connect', () => {
