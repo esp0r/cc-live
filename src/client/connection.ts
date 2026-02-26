@@ -22,30 +22,17 @@ export function createConnection(
   });
 
   const conn: Connection = { socket, sessionId, connected: false };
-  let errorCount = 0;
-
-  process.stderr.write(`\x1b[90m[cc-live] connecting to ${serverUrl}...\x1b[0m\n`);
 
   socket.on('connect', () => {
     conn.connected = true;
-    errorCount = 0;
-    process.stderr.write(`\x1b[32m[cc-live] connected (session ${sessionId.slice(0, 8)})\x1b[0m\n`);
   });
 
-  socket.on('disconnect', (reason: string) => {
+  socket.on('disconnect', () => {
     conn.connected = false;
-    process.stderr.write(`\x1b[33m[cc-live] disconnected: ${reason}\x1b[0m\n`);
   });
 
-  socket.on('connect_error', (err: Error) => {
+  socket.on('connect_error', () => {
     conn.connected = false;
-    errorCount++;
-    // Log first 3 errors, then every 10th to avoid spam
-    if (errorCount <= 3 || errorCount % 10 === 0) {
-      process.stderr.write(
-        `\x1b[33m[cc-live] connection error (attempt ${errorCount}): ${err.message}\x1b[0m\n`
-      );
-    }
   });
 
   return conn;
