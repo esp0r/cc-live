@@ -18,7 +18,10 @@ function main(): void {
   }
 
   // Live mode: PTY proxy with streaming
-  startProxy({ serverUrl, token }, args);
+  startProxy({ serverUrl, token }, args).catch((err) => {
+    process.stderr.write(`[cc-live] fatal: ${err.message}\n`);
+    process.exit(1);
+  });
 }
 
 main();

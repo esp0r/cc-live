@@ -1,4 +1,3 @@
-import * as pty from 'node-pty';
 import os from 'os';
 import { randomUUID } from 'crypto';
 import {
@@ -11,7 +10,8 @@ import {
 } from './connection';
 import { ClientConfig } from '../shared/types';
 
-export function startProxy(config: ClientConfig, args: string[]): void {
+export async function startProxy(config: ClientConfig, args: string[]): Promise<void> {
+  const pty = await import('node-pty');
   const sessionId = randomUUID();
   const cols = process.stdout.columns || 80;
   const rows = process.stdout.rows || 24;
