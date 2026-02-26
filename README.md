@@ -27,11 +27,26 @@ Claude Code 终端会话的实时直播与远程控制。
 
 - **直通模式**：当 `CC_LIVE_SERVER` 未设置时，`cc-live` 直接执行 `claude`，零开销 — 无 PTY、无 WebSocket、不加载额外依赖。
 
-## 一键部署到 Railway
+## 部署到 Railway
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/new?repo=https://github.com/esp0r/cc-live)
+项目已包含 `railway.json` 配置文件，支持两种方式部署：
 
-点击上方按钮即可将 `cc-live-server` 部署到 Railway。部署后需要进行以下配置：
+### 方式一：通过 GitHub 仓库部署
+
+1. Fork 本仓库到你的 GitHub 账号
+2. 登录 [railway.com](https://railway.com)，点击 **New Project → Deploy from GitHub repo**
+3. 选择你 fork 的 `cc-live` 仓库，Railway 会自动识别 `railway.json` 并开始构建
+
+### 方式二：通过 Railway CLI 部署
+
+```bash
+npm i -g @railway/cli
+railway login
+railway init        # 创建新项目
+railway up          # 部署
+```
+
+### 部署后配置
 
 1. **设置环境变量**：在 Railway 项目的 Variables 页面添加 `CC_LIVE_TOKEN`（认证令牌），`PORT` 由 Railway 自动注入，无需手动设置
 2. **开启公网访问**：进入 Settings → Networking → Public Networking，点击生成域名（会得到一个 `xxx.railway.app` 地址）
