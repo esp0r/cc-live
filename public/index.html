@@ -102,10 +102,14 @@
     }
 
     /* Tab bar */
-    #tab-bar {
+    #tab-bar-wrapper {
       display: flex; background: #161b22;
       border-bottom: 1px solid #30363d;
-      min-height: 36px; overflow-x: auto;
+      min-height: 36px;
+    }
+    #tab-bar {
+      display: flex; flex: 1;
+      overflow-x: auto;
     }
     .tab {
       padding: 0.5rem 1rem; font-size: 0.8rem;
@@ -137,6 +141,21 @@
       color: #6e7681; font-size: 0.9rem;
     }
 
+    /* Font size controls */
+    .font-controls {
+      display: flex; align-items: center; gap: 2px;
+      margin-left: auto; flex-shrink: 0;
+    }
+    .font-btn {
+      background: none; border: 1px solid #30363d; border-radius: 4px;
+      color: #8b949e; font-size: 0.75rem; cursor: pointer;
+      padding: 2px 6px; line-height: 1.2;
+    }
+    .font-btn:hover { background: #30363d; color: #c9d1d9; }
+    .font-size-label {
+      font-size: 0.7rem; color: #6e7681; min-width: 24px; text-align: center;
+    }
+
     /* Mobile toolbar - hidden on desktop */
     #mobile-toolbar { display: none; }
     #sidebar-close { display: none; }
@@ -158,10 +177,7 @@
         color: #8b949e; overflow: hidden; text-overflow: ellipsis;
         white-space: nowrap; padding: 0 8px;
       }
-      /* Spacer to balance the hamburger button */
-      #mobile-toolbar::after {
-        content: ''; width: 36px; flex-shrink: 0;
-      }
+      .font-btn { padding: 4px 8px; font-size: 0.85rem; }
 
       #sidebar {
         position: fixed; inset: 0; z-index: 100;
@@ -178,7 +194,7 @@
         margin-left: auto;
       }
 
-      #tab-bar { display: none; }
+      #tab-bar-wrapper { display: none; }
 
       #main { flex: 1; min-height: 0; }
 
@@ -205,6 +221,11 @@
 <div id="mobile-toolbar">
   <button id="menu-btn">&#9776;</button>
   <span id="mobile-title">cc-live</span>
+  <div class="font-controls">
+    <button class="font-btn" id="mobile-font-dec">A-</button>
+    <span class="font-size-label" id="mobile-font-label">12</span>
+    <button class="font-btn" id="mobile-font-inc">A+</button>
+  </div>
 </div>
 
 <div id="sidebar">
@@ -221,7 +242,14 @@
 </div>
 
 <div id="main">
-  <div id="tab-bar"></div>
+  <div id="tab-bar-wrapper">
+    <div id="tab-bar"></div>
+    <div class="font-controls" id="desktop-font-controls" style="padding: 0 8px;">
+      <button class="font-btn" id="desktop-font-dec">A-</button>
+      <span class="font-size-label" id="desktop-font-label">14</span>
+      <button class="font-btn" id="desktop-font-inc">A+</button>
+    </div>
+  </div>
   <div id="terminal-area">
     <div id="empty-state">Select a session from the sidebar</div>
   </div>
@@ -257,6 +285,28 @@
   function isMobile() { return window.innerWidth <= 768; }
   function closeSidebar() { sidebar.classList.remove('open'); }
   function openSidebar() { sidebar.classList.add('open'); }
+
+  // Font size controls
+  let currentFontSize = isMobile() ? 12 : 14;
+  const MIN_FONT = 8, MAX_FONT = 24;
+
+  function updateFontSize(delta) {
+    currentFontSize = Math.max(MIN_FONT, Math.min(MAX_FONT, currentFontSize + delta));
+    tabs.forEach(({ term, fitAddon }) => {
+      term.options.fontSize = currentFontSize;
+      fitAddon.fit();
+    });
+    // Update all labels
+    document.querySelectorAll('.font-size-label').forEach(el => {
+      el.textContent = currentFontSize;
+    });
+  }
+
+  // Wire up both mobile and desktop font buttons
+  document.getElementById('mobile-font-dec').onclick = () => updateFontSize(-1);
+  document.getElementById('mobile-font-inc').onclick = () => updateFontSize(1);
+  document.getElementById('desktop-font-dec').onclick = () => updateFontSize(-1);
+  document.getElementById('desktop-font-inc').onclick = () => updateFontSize(1);
 
   menuBtn.onclick = () => {
     sidebar.classList.toggle('open');
@@ -425,7 +475,7 @@
         brightCyan: '#4ec9b0',
         brightWhite: '#d4d4d4',
       },
-      fontSize: isMobile() ? 12 : 14,
+      fontSize: currentFontSize,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       cursorBlink: true,
       scrollback: 10000,
