@@ -18,6 +18,7 @@ export interface SessionInfo {
   streamSocketId: string;
   viewers: Set<string>;
   scrollbackBuffer: string;
+  disconnectedAt?: number;
 }
 
 // --- Session info exposed to viewers ---

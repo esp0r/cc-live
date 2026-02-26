@@ -46,7 +46,9 @@ export function removeSession(
   const session = registry.sessions.get(sessionId);
   if (!session) return null;
   registry.sessions.delete(sessionId);
-  registry.socketToSession.delete(session.streamSocketId);
+  if (session.streamSocketId) {
+    registry.socketToSession.delete(session.streamSocketId);
+  }
   return session;
 }
 
@@ -57,6 +59,47 @@ export function removeSessionBySocketId(
   const sessionId = registry.socketToSession.get(streamSocketId);
   if (!sessionId) return null;
   return removeSession(registry, sessionId);
+}
+
+export function markDisconnected(
+  registry: SessionRegistry,
+  sessionId: string
+): boolean {
+  const session = registry.sessions.get(sessionId);
+  if (!session) return false;
+  if (session.streamSocketId) {
+    registry.socketToSession.delete(session.streamSocketId);
+  }
+  session.streamSocketId = '';
+  session.disconnectedAt = Date.now();
+  return true;
+}
+
+export function reconnectSession(
+  registry: SessionRegistry,
+  sessionId: string,
+  newSocketId: string
+): SessionInfo | null {
+  const session = registry.sessions.get(sessionId);
+  if (!session || !session.disconnectedAt) return null;
+  session.streamSocketId = newSocketId;
+  session.disconnectedAt = undefined;
+  registry.socketToSession.set(newSocketId, sessionId);
+  return session;
+}
+
+export function getExpiredSessions(
+  registry: SessionRegistry,
+  graceMs: number
+): string[] {
+  const now = Date.now();
+  const expired: string[] = [];
+  for (const session of registry.sessions.values()) {
+    if (session.disconnectedAt && now - session.disconnectedAt > graceMs) {
+      expired.push(session.sessionId);
+    }
+  }
+  return expired;
 }
 
 export function getSession(

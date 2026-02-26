@@ -436,6 +436,35 @@
         autoFit(tab);
       }
     });
+
+    socket.on('session-disconnected', ({ sessionId }) => {
+      const tab = tabs.get(sessionId);
+      if (tab) {
+        tab.term.write('\r\n\x1b[33m--- connection lost, waiting for reconnect... ---\x1b[0m\r\n');
+      }
+      // Update sidebar status dot to yellow
+      const el = sessionList.querySelector(`.session-item[data-id="${sessionId}"]`);
+      if (el) {
+        const dot = el.querySelector('.status-dot');
+        if (dot) dot.style.background = '#d29922';
+      }
+    });
+
+    socket.on('session-reconnected', ({ sessionId, cols, rows }) => {
+      const tab = tabs.get(sessionId);
+      if (tab) {
+        tab.term.write('\r\n\x1b[32m--- reconnected ---\x1b[0m\r\n');
+        tab.sessionCols = cols;
+        tab.sessionRows = rows;
+        autoFit(tab);
+      }
+      // Restore sidebar status dot to green
+      const el = sessionList.querySelector(`.session-item[data-id="${sessionId}"]`);
+      if (el) {
+        const dot = el.querySelector('.status-dot');
+        if (dot) dot.style.background = '#3fb950';
+      }
+    });
   }
 
   function renderSessionList() {

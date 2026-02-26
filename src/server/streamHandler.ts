@@ -2,23 +2,53 @@ import { Socket, Namespace } from 'socket.io';
 import {
   SessionRegistry,
   registerSession,
-  removeSessionBySocketId,
+  removeSession,
   getSessionBySocketId,
   appendOutput,
   updateSize,
-  listSessions,
+  markDisconnected,
+  reconnectSession,
+  getExpiredSessions,
 } from './registry';
 import { SessionRegistration } from '../shared/types';
+
+const GRACE_PERIOD_MS = 30_000; // 30 seconds
 
 export function setupStreamHandlers(
   streamNs: Namespace,
   viewerNs: Namespace,
   registry: SessionRegistry
 ): void {
+  // Periodically clean up sessions that exceeded the grace period
+  setInterval(() => {
+    const expired = getExpiredSessions(registry, GRACE_PERIOD_MS);
+    for (const sessionId of expired) {
+      const session = removeSession(registry, sessionId);
+      if (session) {
+        console.log(`[stream] session expired after grace period: ${sessionId}`);
+        viewerNs.emit('session-removed', { sessionId });
+      }
+    }
+  }, 5_000);
+
   streamNs.on('connection', (socket: Socket) => {
     console.log(`[stream] client connected: ${socket.id}`);
 
     socket.on('register', (data: SessionRegistration) => {
+      // Check if this is a reconnection (same sessionId with a disconnected session)
+      const existing = reconnectSession(registry, data.sessionId, socket.id);
+      if (existing) {
+        console.log(`[stream] session reconnected: ${data.sessionId}`);
+        updateSize(registry, data.sessionId, data.cols, data.rows);
+        viewerNs.emit('session-reconnected', {
+          sessionId: existing.sessionId,
+          cols: data.cols,
+          rows: data.rows,
+        });
+        return;
+      }
+
+      // New session registration
       const session = registerSession(
         registry,
         data.sessionId,
@@ -68,10 +98,11 @@ export function setupStreamHandlers(
     });
 
     socket.on('disconnect', () => {
-      const session = removeSessionBySocketId(registry, socket.id);
+      const session = getSessionBySocketId(registry, socket.id);
       if (session) {
-        console.log(`[stream] session disconnected: ${session.sessionId}`);
-        viewerNs.emit('session-removed', { sessionId: session.sessionId });
+        console.log(`[stream] session disconnected (grace period): ${session.sessionId}`);
+        markDisconnected(registry, session.sessionId);
+        viewerNs.emit('session-disconnected', { sessionId: session.sessionId });
       }
     });
   });
