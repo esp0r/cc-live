@@ -30,7 +30,7 @@
     }
     .login-box h1 { font-size: 1.5rem; margin-bottom: 1rem; color: #58a6ff; }
     .login-box input {
-      padding: 0.6rem 1rem; width: 280px;
+      padding: 0.6rem 1rem; width: 280px; max-width: 80vw;
       background: #161b22; border: 1px solid #30363d; border-radius: 6px;
       color: #c9d1d9; font-size: 1rem; outline: none;
     }
@@ -136,6 +136,57 @@
       display: flex; align-items: center; justify-content: center;
       color: #6e7681; font-size: 0.9rem;
     }
+
+    /* Mobile toolbar - hidden on desktop */
+    #mobile-toolbar { display: none; }
+    #sidebar-close { display: none; }
+
+    @media (max-width: 768px) {
+      body { flex-direction: column; }
+
+      #mobile-toolbar {
+        display: flex; align-items: center;
+        height: 44px; padding: 0 12px; flex-shrink: 0;
+        background: #161b22; border-bottom: 1px solid #30363d;
+      }
+      #menu-btn {
+        background: none; border: none; color: #c9d1d9;
+        font-size: 1.4rem; cursor: pointer; padding: 4px 8px;
+      }
+      #mobile-title {
+        flex: 1; text-align: center; font-size: 0.85rem;
+        color: #8b949e; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap; padding: 0 8px;
+      }
+      /* Spacer to balance the hamburger button */
+      #mobile-toolbar::after {
+        content: ''; width: 36px; flex-shrink: 0;
+      }
+
+      #sidebar {
+        position: fixed; inset: 0; z-index: 100;
+        width: 100%; min-width: 0;
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+      }
+      #sidebar.open { transform: translateX(0); }
+
+      #sidebar-close {
+        display: block;
+        background: none; border: none; color: #8b949e;
+        font-size: 1.5rem; cursor: pointer; padding: 4px 8px;
+        margin-left: auto;
+      }
+
+      #tab-bar { display: none; }
+
+      #main { flex: 1; min-height: 0; }
+
+      .terminal-container { padding: 0; }
+
+      .login-box button { margin-left: 0; margin-top: 0.5rem; display: block; width: 100%; }
+      .login-box input { display: block; width: 80vw; max-width: 280px; margin: 0 auto; }
+    }
   </style>
 </head>
 <body>
@@ -151,9 +202,15 @@
   </div>
 </div>
 
+<div id="mobile-toolbar">
+  <button id="menu-btn">&#9776;</button>
+  <span id="mobile-title">cc-live</span>
+</div>
+
 <div id="sidebar">
   <div class="sidebar-header">
     Sessions <span id="session-count" class="session-count">0</span>
+    <button id="sidebar-close">&times;</button>
   </div>
   <div id="session-list">
     <div class="no-sessions" id="no-sessions">
@@ -192,6 +249,19 @@
   const tabBar = document.getElementById('tab-bar');
   const terminalArea = document.getElementById('terminal-area');
   const emptyState = document.getElementById('empty-state');
+  const sidebar = document.getElementById('sidebar');
+  const menuBtn = document.getElementById('menu-btn');
+  const sidebarClose = document.getElementById('sidebar-close');
+  const mobileTitle = document.getElementById('mobile-title');
+
+  function isMobile() { return window.innerWidth <= 768; }
+  function closeSidebar() { sidebar.classList.remove('open'); }
+  function openSidebar() { sidebar.classList.add('open'); }
+
+  menuBtn.onclick = () => {
+    sidebar.classList.toggle('open');
+  };
+  sidebarClose.onclick = closeSidebar;
 
   // Check URL token
   const urlToken = new URLSearchParams(location.search).get('token');
@@ -355,7 +425,7 @@
         brightCyan: '#4ec9b0',
         brightWhite: '#d4d4d4',
       },
-      fontSize: 14,
+      fontSize: isMobile() ? 12 : 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       cursorBlink: true,
       scrollback: 10000,
@@ -397,11 +467,20 @@
     socket.emit('watch', { sessionId });
 
     switchTab(sessionId);
+
+    // On mobile, close sidebar after selecting a session
+    if (isMobile()) closeSidebar();
   }
 
   function switchTab(sessionId) {
     activeTab = sessionId;
     emptyState.style.display = 'none';
+
+    // Update mobile title
+    const sess = sessions.get(sessionId);
+    if (sess) {
+      mobileTitle.textContent = sess.hostname + ':' + shortPath(sess.cwd);
+    }
 
     // Update tab bar
     tabBar.querySelectorAll('.tab').forEach(t => {
@@ -418,13 +497,13 @@
       el.classList.toggle('active', el.dataset.id === sessionId);
     });
 
-    // Fit terminal
+    // Fit terminal (longer delay on mobile to wait for sidebar animation)
     const tab = tabs.get(sessionId);
     if (tab) {
       setTimeout(() => {
         tab.fitAddon.fit();
         tab.term.focus();
-      }, 50);
+      }, isMobile() ? 250 : 50);
     }
   }
 
