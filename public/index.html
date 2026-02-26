@@ -221,6 +221,7 @@
 <div id="mobile-toolbar">
   <button id="menu-btn">&#9776;</button>
   <span id="mobile-title">cc-live</span>
+  <button class="font-btn" id="mobile-shift-tab" title="Send Shift+Tab">⇧Tab</button>
   <div class="font-controls">
     <button class="font-btn" id="mobile-font-dec">A-</button>
     <span class="font-size-label" id="mobile-font-label">7</span>
@@ -244,6 +245,7 @@
 <div id="main">
   <div id="tab-bar-wrapper">
     <div id="tab-bar"></div>
+    <button class="font-btn" id="desktop-shift-tab" title="Send Shift+Tab" style="margin: auto 4px auto 8px;">⇧Tab</button>
     <div class="font-controls" id="desktop-font-controls" style="padding: 0 8px;">
       <button class="font-btn" id="desktop-font-dec">A-</button>
       <span class="font-size-label" id="desktop-font-label">14</span>
@@ -307,6 +309,15 @@
   document.getElementById('mobile-font-inc').onclick = () => updateFontSize(1);
   document.getElementById('desktop-font-dec').onclick = () => updateFontSize(-1);
   document.getElementById('desktop-font-inc').onclick = () => updateFontSize(1);
+
+  // Shift+Tab button — sends escape sequence \x1b[Z
+  function sendShiftTab() {
+    if (activeTab && socket && socket.connected) {
+      socket.emit('input', { sessionId: activeTab, data: '\x1b[Z' });
+    }
+  }
+  document.getElementById('mobile-shift-tab').onclick = sendShiftTab;
+  document.getElementById('desktop-shift-tab').onclick = sendShiftTab;
 
   menuBtn.onclick = () => {
     sidebar.classList.toggle('open');
