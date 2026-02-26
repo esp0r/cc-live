@@ -223,7 +223,7 @@
   <span id="mobile-title">cc-live</span>
   <div class="font-controls">
     <button class="font-btn" id="mobile-font-dec">A-</button>
-    <span class="font-size-label" id="mobile-font-label">12</span>
+    <span class="font-size-label" id="mobile-font-label">10</span>
     <button class="font-btn" id="mobile-font-inc">A+</button>
   </div>
 </div>
@@ -287,8 +287,8 @@
   function openSidebar() { sidebar.classList.add('open'); }
 
   // Font size controls
-  let currentFontSize = isMobile() ? 12 : 14;
-  const MIN_FONT = 8, MAX_FONT = 24;
+  let currentFontSize = isMobile() ? 10 : 14;
+  const MIN_FONT = 4, MAX_FONT = 24;
 
   function updateFontSize(delta) {
     currentFontSize = Math.max(MIN_FONT, Math.min(MAX_FONT, currentFontSize + delta));
