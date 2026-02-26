@@ -1,33 +1,49 @@
 # cc-live
 
-Live streaming and remote control for Claude Code terminal sessions.
+Claude Code 终端会话的实时直播与远程控制。
 
-Transparently wraps the `claude` CLI with a PTY proxy that streams terminal I/O to a central server in real-time. A web dashboard lets you watch and control all active sessions from any browser.
+透明地包装 `claude` CLI，通过 PTY 代理将终端 I/O 实时流式传输到中央服务器。Web 仪表盘可以在任何浏览器中查看和控制所有活跃会话。
 
 ```
-Developer Machine(s)                    Public Server
+开发者机器                                公网服务器
 ┌──────────────┐                      ┌──────────────────┐
 │ Terminal      │                      │  cc-live-server   │
 │  ↕            │                      │                   │
-│ cc-live       │───── WebSocket ────→ │  /stream (clients) │
-│  ↕            │                      │  /viewer (browsers)│
-│ claude (CLI)  │                      │  Web Dashboard     │
+│ cc-live       │───── WebSocket ────→ │  /stream (客户端)  │
+│  ↕            │                      │  /viewer (浏览器)  │
+│ claude (CLI)  │                      │  Web 仪表盘        │
 └──────────────┘                      └──────────────────┘
                                              ↕
-Developer Machine B                    Browser (xterm.js)
-└── cc-live ──── WebSocket ────→       - view all sessions
-                                       - type to control
+开发者机器 B                            浏览器 (xterm.js)
+└── cc-live ──── WebSocket ────→       - 查看所有会话
+                                       - 输入以控制远程终端
 ```
 
-## How It Works
+## 工作原理
 
-- **`cc-live`** (client) spawns `claude` inside a PTY via `node-pty`. All stdin/stdout passes through to your local terminal as normal. Simultaneously, terminal output is streamed to the server over WebSocket. Remote input from the browser is written back into the PTY.
+- **`cc-live`**（客户端）通过 `node-pty` 在 PTY 中启动 `claude`。所有 stdin/stdout 照常传输到你的本地终端，同时终端输出通过 WebSocket 流式传输到服务器。浏览器端的远程输入也会写回 PTY。
 
-- **`cc-live-server`** (server) runs on a machine with a public IP. It accepts streaming connections from clients (`/stream` namespace) and browser viewers (`/viewer` namespace). Each session maintains a 100KB scrollback buffer so new viewers get immediate context.
+- **`cc-live-server`**（服务器）运行在公网可访问的机器上。它接受来自客户端的流式连接（`/stream` 命名空间）和浏览器查看器的连接（`/viewer` 命名空间）。每个会话维护 100KB 的回滚缓冲区，新查看者可以立即获取上下文。
 
-- **Passthrough mode**: when `CC_LIVE_SERVER` is not set, `cc-live` directly executes `claude` with zero overhead — no PTY, no WebSocket, no extra dependencies loaded.
+- **直通模式**：当 `CC_LIVE_SERVER` 未设置时，`cc-live` 直接执行 `claude`，零开销 — 无 PTY、无 WebSocket、不加载额外依赖。
 
-## Install
+## 一键部署到 Railway
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/new?repo=https://github.com/esp0r/cc-live)
+
+点击上方按钮即可将 `cc-live-server` 部署到 Railway。部署后需要进行以下配置：
+
+1. **设置环境变量**：在 Railway 项目的 Variables 页面添加 `CC_LIVE_TOKEN`（认证令牌），`PORT` 由 Railway 自动注入，无需手动设置
+2. **开启公网访问**：进入 Settings → Networking → Public Networking，点击生成域名（会得到一个 `xxx.railway.app` 地址）
+3. **客户端连接**：
+   ```bash
+   export CC_LIVE_SERVER="wss://你的应用.railway.app"
+   export CC_LIVE_TOKEN="你设置的令牌"
+   cc-live
+   ```
+4. **打开仪表盘**：在浏览器中访问 `https://你的应用.railway.app`
+
+## 安装
 
 ```bash
 git clone https://github.com/esp0r/cc-live.git
@@ -37,82 +53,81 @@ npm run build
 npm link
 ```
 
-This installs two global commands: `cc-live` and `cc-live-server`.
+这将安装两个全局命令：`cc-live` 和 `cc-live-server`。
 
-## Setup
+## 配置
 
-### Server (public IP machine)
+### 服务器（公网 IP 机器）
 
 ```bash
 CC_LIVE_TOKEN=your-secret-token CC_LIVE_PORT=3000 cc-live-server
 ```
 
-For production, put behind nginx/caddy for TLS and use pm2 or systemd:
+生产环境建议使用 nginx/caddy 做 TLS 反向代理，并用 pm2 或 systemd 管理进程：
 
 ```bash
-# systemd example
 CC_LIVE_TOKEN=your-secret-token CC_LIVE_PORT=3000 pm2 start cc-live-server --name cc-live
 ```
 
-### Client (development machines)
+### 客户端（开发机器）
 
-Add to `~/.bashrc` or `~/.zshrc`:
+在 `~/.bashrc` 或 `~/.zshrc` 中添加：
 
 ```bash
-export CC_LIVE_SERVER="ws://your-server-ip:3000"   # or wss:// with TLS
+export CC_LIVE_SERVER="ws://你的服务器IP:3000"   # 使用 TLS 则为 wss://
 export CC_LIVE_TOKEN="your-secret-token"
 alias claude='cc-live'
 ```
 
-Then use `claude` as normal. The streaming happens transparently in the background.
+之后正常使用 `claude` 即可，流式传输在后台透明进行。
 
-### Dashboard
+### 仪表盘
 
-Open `http://your-server-ip:3000` in a browser. Enter your token to connect.
+在浏览器中打开 `http://你的服务器IP:3000`，输入令牌连接。
 
-- Left sidebar shows all active sessions (hostname, working directory, duration)
-- Click a session to open a live terminal view
-- Type in the terminal to send input to the remote session
-- Multiple sessions can be opened in tabs
+- 左侧栏显示所有活跃会话（主机名、工作目录、持续时间）
+- 点击会话打开实时终端视图
+- 在终端中输入可向远程会话发送指令
+- 可同时打开多个会话标签页
 
-## Architecture
+## 项目结构
 
 ```
 src/
 ├── shared/
-│   └── types.ts              # Shared interfaces
+│   └── types.ts              # 共享接口定义
 ├── client/
-│   ├── index.ts              # CLI entry point (passthrough or proxy)
-│   ├── proxy.ts              # PTY proxy core
-│   └── connection.ts         # WebSocket connection management
+│   ├── index.ts              # CLI 入口（直通或代理模式）
+│   ├── proxy.ts              # PTY 代理核心
+│   └── connection.ts         # WebSocket 连接管理
 └── server/
-    ├── index.ts              # Server entry point
-    ├── app.ts                # Express + Socket.io setup
-    ├── registry.ts           # Session registry + scrollback buffer
-    ├── streamHandler.ts      # /stream namespace handlers
-    └── viewerHandler.ts      # /viewer namespace handlers
+    ├── index.ts              # 服务器入口
+    ├── app.ts                # Express + Socket.io 初始化
+    ├── registry.ts           # 会话注册表 + 回滚缓冲区
+    ├── streamHandler.ts      # /stream 命名空间处理
+    └── viewerHandler.ts      # /viewer 命名空间处理
 public/
-    └── index.html            # Web dashboard (xterm.js)
+    └── index.html            # Web 仪表盘 (xterm.js)
 ```
 
-### Key Design Decisions
+### 关键设计决策
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Slow network handling | `volatile.emit` (drop frames) | Never block the local terminal |
-| Viewer catch-up | 100KB scrollback buffer replay | Simple and reliable |
-| Passthrough mode | `spawnSync` (no deps loaded) | Zero overhead when not streaming |
-| Namespaces | `/stream` + `/viewer` | Separate concerns, independent auth |
-| Auth | Shared token (`CC_LIVE_TOKEN`) | Simple for v1, upgradable to JWT |
+| 决策 | 选择 | 理由 |
+|------|------|------|
+| 慢网络处理 | `volatile.emit`（丢帧） | 永不阻塞本地终端 |
+| 查看者追赶 | 100KB 回滚缓冲区重放 | 简单可靠 |
+| 直通模式 | `spawnSync`（不加载依赖） | 不流式传输时零开销 |
+| 命名空间 | `/stream` + `/viewer` | 关注点分离，独立认证 |
+| 认证方式 | 共享令牌（`CC_LIVE_TOKEN`） | v1 简单实现，可升级为 JWT |
 
-## Environment Variables
+## 环境变量
 
-| Variable | Where | Description |
-|----------|-------|-------------|
-| `CC_LIVE_SERVER` | Client | WebSocket URL of the server (`ws://` or `wss://`) |
-| `CC_LIVE_TOKEN` | Both | Shared authentication token |
-| `CC_LIVE_PORT` / `PORT` | Server | Server listen port (default: 3000) |
+| 变量 | 使用位置 | 说明 |
+|------|----------|------|
+| `CC_LIVE_SERVER` | 客户端 | 服务器的 WebSocket 地址（`ws://` 或 `wss://`） |
+| `CC_LIVE_TOKEN` | 两端 | 共享认证令牌 |
+| `CC_LIVE_PORT` / `PORT` | 服务器 | 监听端口（默认：3000） |
 
-## License
+## 许可证
 
 MIT
