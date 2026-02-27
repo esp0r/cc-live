@@ -22,17 +22,30 @@ export function createConnection(
   });
 
   const conn: Connection = { socket, sessionId, connected: false };
+  const debug = !!process.env.CC_LIVE_DEBUG;
+  let errorCount = 0;
+
+  if (debug) process.stderr.write(`\x1b[90m[cc-live] connecting to ${serverUrl}...\x1b[0m\n`);
 
   socket.on('connect', () => {
     conn.connected = true;
+    errorCount = 0;
+    if (debug) process.stderr.write(`\x1b[32m[cc-live] connected (session ${sessionId.slice(0, 8)})\x1b[0m\n`);
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason: string) => {
     conn.connected = false;
+    if (debug) process.stderr.write(`\x1b[33m[cc-live] disconnected: ${reason}\x1b[0m\n`);
   });
 
-  socket.on('connect_error', () => {
+  socket.on('connect_error', (err: Error) => {
     conn.connected = false;
+    errorCount++;
+    if (debug && (errorCount <= 3 || errorCount % 10 === 0)) {
+      process.stderr.write(
+        `\x1b[33m[cc-live] connection error (attempt ${errorCount}): ${err.message}\x1b[0m\n`
+      );
+    }
   });
 
   return conn;
