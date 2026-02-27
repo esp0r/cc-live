@@ -1,5 +1,16 @@
 import { io, Socket } from 'socket.io-client';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { SessionRegistration } from '../shared/types';
+
+function getProxyAgent(): HttpsProxyAgent<string> | undefined {
+  const proxyUrl =
+    process.env.https_proxy ||
+    process.env.HTTPS_PROXY ||
+    process.env.http_proxy ||
+    process.env.HTTP_PROXY;
+  if (!proxyUrl) return undefined;
+  return new HttpsProxyAgent(proxyUrl);
+}
 
 export interface Connection {
   socket: Socket;
@@ -12,6 +23,7 @@ export function createConnection(
   token: string,
   sessionId: string
 ): Connection {
+  const agent = getProxyAgent();
   const socket = io(`${serverUrl}/stream`, {
     auth: { token },
     reconnection: true,
@@ -19,6 +31,7 @@ export function createConnection(
     reconnectionDelayMax: 10000,
     reconnectionAttempts: Infinity,
     transports: ['websocket'],
+    ...(agent && { extraHeaders: {}, agent: agent as never }),
   });
 
   const conn: Connection = { socket, sessionId, connected: false };
