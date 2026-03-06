@@ -43,7 +43,7 @@ Claude Code 终端会话的实时直播与远程控制。
    export CC_LIVE_TOKEN="你设置的令牌"
    cc-live
    ```
-4. **打开仪表盘**：在浏览器中访问 `https://你的应用.railway.app`
+4. **打开仪表盘**：在浏览器中访问 `https://你的应用.railway.app`，输入一次令牌后会换成短期 `HttpOnly` Cookie 会话
 
 ## 安装
 
@@ -85,12 +85,21 @@ alias claude='cc-live'
 
 ### 仪表盘
 
-在浏览器中打开 `http://你的服务器IP:3000`，输入令牌连接。
+在浏览器中打开 `http://你的服务器IP:3000`，输入令牌后由服务端设置短期 `HttpOnly` Cookie 会话。
+
+也可以用一次性链接自动登录：
+
+```text
+https://你的服务器域名?token=your-secret-token
+```
+
+页面会在完成登录后立即清掉 URL 中的 `token` 参数，不会写入 Web Storage。
 
 - 左侧栏显示所有活跃会话（主机名、工作目录、持续时间）
 - 点击会话打开实时终端视图
 - 在终端中输入可向远程会话发送指令
 - 可同时打开多个会话标签页
+- 点击 `Logout` 可立即撤销当前浏览器会话
 
 ## 项目结构
 
@@ -105,6 +114,7 @@ src/
 └── server/
     ├── index.ts              # 服务器入口
     ├── app.ts                # Express + Socket.io 初始化
+    ├── auth.ts               # 浏览器 Cookie 会话鉴权
     ├── registry.ts           # 会话注册表 + 回滚缓冲区
     ├── streamHandler.ts      # /stream 命名空间处理
     └── viewerHandler.ts      # /viewer 命名空间处理
@@ -120,7 +130,7 @@ public/
 | 查看者追赶 | 100KB 回滚缓冲区重放 | 简单可靠 |
 | 直通模式 | `spawnSync`（不加载依赖） | 不流式传输时零开销 |
 | 命名空间 | `/stream` + `/viewer` | 关注点分离，独立认证 |
-| 认证方式 | 共享令牌（`CC_LIVE_TOKEN`） | v1 简单实现，可升级为 JWT |
+| 认证方式 | CLI 共享令牌 + 浏览器 `HttpOnly` Cookie 会话 | 浏览器不再持有明文令牌，仍保持部署简单 |
 
 ## 环境变量
 

@@ -232,6 +232,7 @@
 <div id="sidebar">
   <div class="sidebar-header">
     Sessions <span id="session-count" class="session-count">0</span>
+    <button class="font-btn" id="logout-btn" style="margin-left: auto;">Logout</button>
     <button id="sidebar-close">&times;</button>
   </div>
   <div id="session-list">
@@ -290,6 +291,7 @@
   const menuBtn = document.getElementById('menu-btn');
   const sidebarClose = document.getElementById('sidebar-close');
   const mobileTitle = document.getElementById('mobile-title');
+  const logoutBtn = document.getElementById('logout-btn');
 
   function isMobile() { return window.innerWidth <= 768; }
   function closeSidebar() { sidebar.classList.remove('open'); }
@@ -364,78 +366,142 @@
   };
   sidebarClose.onclick = closeSidebar;
 
-  // Check URL token
-  const urlToken = new URLSearchParams(location.search).get('token');
-  if (urlToken) {
-    sessionStorage.setItem('cc-live-token', urlToken);
-    // Clean URL
-    history.replaceState(null, '', location.pathname);
+  function disconnectSocket() {
+    if (!socket) return;
+    socket.removeAllListeners();
+    socket.disconnect();
+    socket = null;
   }
 
-  const savedToken = sessionStorage.getItem('cc-live-token');
-  if (savedToken) {
-    connect(savedToken);
+  function resetDashboardState() {
+    sessions.clear();
+    tabs.forEach((tab) => {
+      tab.term.dispose();
+      tab.container.remove();
+    });
+    tabs.clear();
+    tabBar.innerHTML = '';
+    activeTab = null;
+    emptyState.style.display = '';
+    mobileTitle.textContent = 'cc-live';
+    renderSessionList();
   }
 
-  loginBtn.onclick = () => {
-    const token = tokenInput.value.trim();
-    if (!token) return;
-    connect(token);
-  };
-  tokenInput.onkeydown = (e) => {
-    if (e.key === 'Enter') loginBtn.onclick();
-  };
+  function showLogin(message) {
+    loginError.textContent = message || '';
+    loginOverlay.classList.remove('hidden');
+  }
 
-  function connect(token) {
+  function hideLogin() {
     loginError.textContent = '';
-    if (socket) socket.disconnect();
+    loginOverlay.classList.add('hidden');
+    tokenInput.value = '';
+  }
 
-    socket = io('/viewer', {
-      auth: { token },
+  async function postJson(url, body) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body || {}),
+    });
+
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch {
+      payload = {};
+    }
+
+    if (!response.ok) {
+      const message = typeof payload.error === 'string'
+        ? payload.error
+        : `Request failed (${response.status})`;
+      throw new Error(message);
+    }
+
+    return payload;
+  }
+
+  function loadSessions(currentSocket) {
+    currentSocket.emit('list-sessions', (list) => {
+      sessions.clear();
+      list.forEach(s => sessions.set(s.sessionId, s));
+      renderSessionList();
+    });
+  }
+
+  function connectViewer(options = {}) {
+    const { silentAuthFailure = false } = options;
+
+    disconnectSocket();
+    const currentSocket = io('/viewer', {
       transports: ['websocket'],
     });
+    let hasConnected = false;
+    socket = currentSocket;
 
-    socket.on('connect', () => {
-      sessionStorage.setItem('cc-live-token', token);
-      loginOverlay.classList.add('hidden');
-      socket.emit('list-sessions', (list) => {
-        sessions.clear();
-        list.forEach(s => sessions.set(s.sessionId, s));
-        renderSessionList();
-      });
+    currentSocket.on('connect', () => {
+      if (socket !== currentSocket) return;
+      hasConnected = true;
+      hideLogin();
+      loadSessions(currentSocket);
     });
 
-    socket.on('connect_error', (err) => {
-      loginError.textContent = 'Connection failed: ' + err.message;
-      loginOverlay.classList.remove('hidden');
+    currentSocket.on('connect_error', (err) => {
+      if (socket !== currentSocket) return;
+      const message = err && err.message ? err.message : 'Unknown error';
+      if (message === 'Authentication failed') {
+        disconnectSocket();
+        resetDashboardState();
+        if (!hasConnected && silentAuthFailure) {
+          showLogin('');
+          return;
+        }
+        showLogin(hasConnected
+          ? 'Session expired. Please log in again.'
+          : 'Authentication failed.');
+        return;
+      }
+      if (!hasConnected) {
+        disconnectSocket();
+        resetDashboardState();
+        showLogin('Connection failed: ' + message);
+      }
     });
 
-    socket.on('session-added', (s) => {
+    currentSocket.on('auth-expired', () => {
+      if (socket !== currentSocket) return;
+      disconnectSocket();
+      resetDashboardState();
+      showLogin('Session expired. Please log in again.');
+    });
+
+    currentSocket.on('session-added', (s) => {
       sessions.set(s.sessionId, s);
       renderSessionList();
     });
 
-    socket.on('session-removed', ({ sessionId }) => {
+    currentSocket.on('session-removed', ({ sessionId }) => {
       sessions.delete(sessionId);
       renderSessionList();
-      // Mark tab as disconnected but keep it open
       const tab = tabs.get(sessionId);
       if (tab) {
         tab.term.write('\r\n\x1b[33m--- session ended ---\x1b[0m\r\n');
       }
     });
 
-    socket.on('scrollback', ({ sessionId, data }) => {
+    currentSocket.on('scrollback', ({ sessionId, data }) => {
       const tab = tabs.get(sessionId);
       if (tab) tab.term.write(data);
     });
 
-    socket.on('session-output', ({ sessionId, data }) => {
+    currentSocket.on('session-output', ({ sessionId, data }) => {
       const tab = tabs.get(sessionId);
       if (tab) tab.term.write(data);
     });
 
-    socket.on('session-resize', ({ sessionId, cols, rows }) => {
+    currentSocket.on('session-resize', ({ sessionId, cols, rows }) => {
       const tab = tabs.get(sessionId);
       if (tab) {
         tab.sessionCols = cols;
@@ -444,12 +510,11 @@
       }
     });
 
-    socket.on('session-disconnected', ({ sessionId }) => {
+    currentSocket.on('session-disconnected', ({ sessionId }) => {
       const tab = tabs.get(sessionId);
       if (tab) {
         tab.term.write('\r\n\x1b[33m--- connection lost, waiting for reconnect... ---\x1b[0m\r\n');
       }
-      // Update sidebar status dot to yellow
       const el = sessionList.querySelector(`.session-item[data-id="${sessionId}"]`);
       if (el) {
         const dot = el.querySelector('.status-dot');
@@ -457,7 +522,7 @@
       }
     });
 
-    socket.on('session-reconnected', ({ sessionId, cols, rows }) => {
+    currentSocket.on('session-reconnected', ({ sessionId, cols, rows }) => {
       const tab = tabs.get(sessionId);
       if (tab) {
         tab.term.write('\r\n\x1b[32m--- reconnected ---\x1b[0m\r\n');
@@ -465,13 +530,59 @@
         tab.sessionRows = rows;
         autoFit(tab);
       }
-      // Restore sidebar status dot to green
       const el = sessionList.querySelector(`.session-item[data-id="${sessionId}"]`);
       if (el) {
         const dot = el.querySelector('.status-dot');
         if (dot) dot.style.background = '#3fb950';
       }
     });
+  }
+
+  async function loginWithToken(token) {
+    const trimmedToken = token.trim();
+    loginError.textContent = '';
+    loginBtn.disabled = true;
+
+    try {
+      await postJson('/api/auth/login', { token: trimmedToken });
+      connectViewer();
+    } catch (err) {
+      showLogin('Login failed: ' + err.message);
+    } finally {
+      loginBtn.disabled = false;
+    }
+  }
+
+  async function logout() {
+    logoutBtn.disabled = true;
+    try {
+      await postJson('/api/auth/logout', {});
+    } catch {
+    } finally {
+      disconnectSocket();
+      resetDashboardState();
+      showLogin('');
+      closeSidebar();
+      logoutBtn.disabled = false;
+    }
+  }
+
+  loginBtn.onclick = () => {
+    loginWithToken(tokenInput.value);
+  };
+  tokenInput.onkeydown = (e) => {
+    if (e.key === 'Enter') loginBtn.onclick();
+  };
+  logoutBtn.onclick = logout;
+
+  const url = new URL(window.location.href);
+  const urlToken = url.searchParams.get('token');
+  if (urlToken !== null) {
+    url.searchParams.delete('token');
+    history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    loginWithToken(urlToken);
+  } else {
+    connectViewer({ silentAuthFailure: true });
   }
 
   function renderSessionList() {
@@ -596,7 +707,9 @@
     tabBar.appendChild(tabEl);
 
     // Watch the session
-    socket.emit('watch', { sessionId });
+    if (socket && socket.connected) {
+      socket.emit('watch', { sessionId });
+    }
 
     switchTab(sessionId);
 
@@ -643,7 +756,9 @@
     const tab = tabs.get(sessionId);
     if (!tab) return;
 
-    socket.emit('unwatch', { sessionId });
+    if (socket && socket.connected) {
+      socket.emit('unwatch', { sessionId });
+    }
     tab.term.dispose();
     tab.container.remove();
     tabs.delete(sessionId);

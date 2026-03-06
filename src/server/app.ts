@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import path from 'path';
@@ -7,6 +7,58 @@ import { createRegistry, listSessions } from './registry';
 import { setupStreamHandlers } from './streamHandler';
 import { setupViewerHandlers } from './viewerHandler';
 import { ServerConfig } from '../shared/types';
+import {
+  BROWSER_SESSION_CLEANUP_MS,
+  BROWSER_SESSION_COOKIE,
+  BROWSER_SESSION_TTL_MS,
+  createBrowserAuthStore,
+  createBrowserSession,
+  getBrowserSession,
+  getBrowserSessionIdFromHeaders,
+  purgeExpiredBrowserSessions,
+  removeBrowserSession,
+} from './auth';
+
+function extractRequestToken(req: Request): string {
+  const queryToken = typeof req.query.token === 'string' ? req.query.token : '';
+  const authHeader = req.headers.authorization;
+  const bearerToken =
+    typeof authHeader === 'string'
+      ? authHeader.replace(/^Bearer\s+/i, '')
+      : '';
+  return queryToken || bearerToken;
+}
+
+function isRequestSecure(req: Request): boolean {
+  const forwardedProto = req.headers['x-forwarded-proto'];
+  const proto = Array.isArray(forwardedProto)
+    ? forwardedProto[0]
+    : forwardedProto;
+  return req.secure || proto === 'https';
+}
+
+function setBrowserSessionCookie(
+  res: Response,
+  sessionId: string,
+  secure: boolean
+): void {
+  res.cookie(BROWSER_SESSION_COOKIE, sessionId, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure,
+    path: '/',
+    maxAge: BROWSER_SESSION_TTL_MS,
+  });
+}
+
+function clearBrowserSessionCookie(res: Response, secure: boolean): void {
+  res.clearCookie(BROWSER_SESSION_COOKIE, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure,
+    path: '/',
+  });
+}
 
 export function createApp(config: ServerConfig) {
   const app = express();
@@ -17,17 +69,69 @@ export function createApp(config: ServerConfig) {
   });
 
   const registry = createRegistry();
+  const browserAuth = createBrowserAuthStore();
+  const streamNs = io.of('/stream');
+  const viewerNs = io.of('/viewer');
+
+  app.set('trust proxy', true);
 
   app.use(cors());
+  app.use(express.json());
   app.use(express.static(path.join(__dirname, '../../public')));
+
+  function getBrowserRequestSession(req: Request) {
+    const sessionId = getBrowserSessionIdFromHeaders(req.headers);
+    if (!sessionId) {
+      return null;
+    }
+    return getBrowserSession(browserAuth, sessionId);
+  }
+
+  function disconnectViewerSocketsForAuthSession(sessionId: string): void {
+    for (const socket of viewerNs.sockets.values()) {
+      if (socket.data.authSessionId === sessionId) {
+        socket.emit('auth-expired');
+        socket.disconnect(true);
+      }
+    }
+  }
 
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', sessions: registry.sessions.size });
   });
 
-  app.get('/api/sessions', (req, res) => {
-    const token = req.query.token || req.headers.authorization?.replace('Bearer ', '');
+  app.post('/api/auth/login', (req, res) => {
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
     if (config.token && token !== config.token) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const existingSessionId = getBrowserSessionIdFromHeaders(req.headers);
+    if (existingSessionId) {
+      removeBrowserSession(browserAuth, existingSessionId);
+      disconnectViewerSocketsForAuthSession(existingSessionId);
+    }
+
+    const session = createBrowserSession(browserAuth);
+    setBrowserSessionCookie(res, session.id, isRequestSecure(req));
+    res.json({ ok: true, expiresAt: session.expiresAt });
+  });
+
+  app.post('/api/auth/logout', (req, res) => {
+    const sessionId = getBrowserSessionIdFromHeaders(req.headers);
+    if (sessionId) {
+      removeBrowserSession(browserAuth, sessionId);
+      disconnectViewerSocketsForAuthSession(sessionId);
+    }
+    clearBrowserSessionCookie(res, isRequestSecure(req));
+    res.json({ ok: true });
+  });
+
+  app.get('/api/sessions', (req, res) => {
+    const browserSession = getBrowserRequestSession(req);
+    const token = extractRequestToken(req);
+    if (config.token && !browserSession && token !== config.token) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
@@ -35,7 +139,6 @@ export function createApp(config: ServerConfig) {
   });
 
   // Auth middleware for /stream namespace
-  const streamNs = io.of('/stream');
   streamNs.use((socket, next) => {
     if (!config.token) return next();
     const token = socket.handshake.auth?.token;
@@ -47,17 +150,41 @@ export function createApp(config: ServerConfig) {
   });
 
   // Auth middleware for /viewer namespace
-  const viewerNs = io.of('/viewer');
   viewerNs.use((socket, next) => {
     if (!config.token) return next();
-    const token =
-      socket.handshake.auth?.token || socket.handshake.query?.token;
-    if (token === config.token) {
+    const sessionId = getBrowserSessionIdFromHeaders(socket.handshake.headers);
+    if (!sessionId) {
+      next(new Error('Authentication failed'));
+      return;
+    }
+
+    const session = getBrowserSession(browserAuth, sessionId);
+    if (session) {
+      socket.data.authSessionId = session.id;
       next();
     } else {
       next(new Error('Authentication failed'));
     }
   });
+
+  setInterval(() => {
+    const expiredSessionIds = purgeExpiredBrowserSessions(browserAuth);
+    if (expiredSessionIds.length === 0) {
+      return;
+    }
+
+    const expiredSessionIdSet = new Set(expiredSessionIds);
+    for (const socket of viewerNs.sockets.values()) {
+      const authSessionId = socket.data.authSessionId;
+      if (
+        typeof authSessionId === 'string' &&
+        expiredSessionIdSet.has(authSessionId)
+      ) {
+        socket.emit('auth-expired');
+        socket.disconnect(true);
+      }
+    }
+  }, BROWSER_SESSION_CLEANUP_MS);
 
   // Wire up handlers
   setupStreamHandlers(streamNs, viewerNs, registry);
