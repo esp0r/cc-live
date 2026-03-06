@@ -1,14 +1,16 @@
 {
   "name": "cc-live",
   "version": "1.0.0",
-  "description": "Live streaming and remote control for Claude Code terminal sessions",
+  "description": "Live streaming and remote control for Claude Code and Codex CLI terminal sessions",
   "bin": {
     "cc-live": "./dist/client/index.js",
+    "codex-live": "./dist/client/codex.js",
     "cc-live-server": "./dist/server/index.js"
   },
   "scripts": {
     "build": "tsc",
     "dev:client": "tsx src/client/index.ts",
+    "dev:codex": "tsx src/client/codex.ts",
     "dev:server": "tsx src/server/index.ts",
     "start:server": "node dist/server/index.js"
   },

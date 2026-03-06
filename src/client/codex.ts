@@ -1,4 +1,4 @@
 #!/usr/bin/env node
 import { runClient } from './main';
 
-runClient('cc-live');
+runClient('codex-live');

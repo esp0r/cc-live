@@ -9,23 +9,40 @@ import {
   disconnect,
 } from './connection';
 import { ClientConfig } from '../shared/types';
+import { ClientRuntime, createLaunchError, formatLog } from './runtime';
 
-export async function startProxy(config: ClientConfig, args: string[]): Promise<void> {
-  const pty = await import('node-pty');
+export async function startProxy(
+  config: ClientConfig,
+  args: string[],
+  runtime: ClientRuntime
+): Promise<void> {
+  let pty: typeof import('node-pty');
+  try {
+    pty = await import('node-pty');
+  } catch (error) {
+    const reason = error instanceof Error ? `: ${error.message}` : '';
+    throw new Error(
+      `proxy mode requires the optional dependency \`node-pty\`${reason}`
+    );
+  }
   const sessionId = randomUUID();
   const cols = process.stdout.columns || 80;
   const rows = process.stdout.rows || 24;
 
-  // Spawn claude in a PTY
-  const ptyProcess = pty.spawn('claude', args, {
-    name: 'xterm-256color',
-    cols,
-    rows,
-    cwd: process.cwd(),
-    env: process.env as { [key: string]: string },
-  });
+  const ptyProcess = (() => {
+    try {
+      return pty.spawn(runtime.command, args, {
+        name: 'xterm-256color',
+        cols,
+        rows,
+        cwd: process.cwd(),
+        env: process.env as { [key: string]: string },
+      });
+    } catch (error) {
+      throw createLaunchError(runtime, error);
+    }
+  })();
 
-  // Enter raw mode (save original state for restore)
   let wasRaw = false;
   if (process.stdin.isTTY) {
     wasRaw = process.stdin.isRaw ?? false;
@@ -33,11 +50,12 @@ export async function startProxy(config: ClientConfig, args: string[]): Promise<
   }
   process.stdin.resume();
 
-  // Connect to streaming server
-  if (process.env.CC_LIVE_DEBUG) {
-    process.stderr.write(`\x1b[90m[cc-live] server=${config.serverUrl} token=${config.token ? '***' : '(empty)'}\x1b[0m\n`);
+  if (runtime.debug) {
+    process.stderr.write(
+      `\x1b[90m${formatLog(runtime, `server=${config.serverUrl} token=${config.token ? '***' : '(empty)'}`)}\x1b[0m\n`
+    );
   }
-  const conn = createConnection(config.serverUrl, config.token, sessionId);
+  const conn = createConnection(config.serverUrl, config.token, sessionId, runtime);
 
   conn.socket.on('connect', () => {
     sendRegister(conn, {
@@ -48,7 +66,6 @@ export async function startProxy(config: ClientConfig, args: string[]): Promise<
     });
   });
 
-  // Local I/O forwarding
   process.stdin.on('data', (data: Buffer) => {
     ptyProcess.write(data.toString());
   });
@@ -58,12 +75,10 @@ export async function startProxy(config: ClientConfig, args: string[]): Promise<
     sendOutput(conn, data);
   });
 
-  // Remote input from browser viewers
   onRemoteInput(conn, (data: string) => {
     ptyProcess.write(data);
   });
 
-  // Terminal resize
   process.on('SIGWINCH', () => {
     const newCols = process.stdout.columns || 80;
     const newRows = process.stdout.rows || 24;
@@ -71,7 +86,6 @@ export async function startProxy(config: ClientConfig, args: string[]): Promise<
     sendResize(conn, newCols, newRows);
   });
 
-  // Cleanup: restore terminal and disconnect
   let cleaned = false;
   function cleanup(exitCode: number) {
     if (cleaned) return;
@@ -84,21 +98,18 @@ export async function startProxy(config: ClientConfig, args: string[]): Promise<
     process.exit(exitCode);
   }
 
-  // When claude exits, cleanup with its exit code
   ptyProcess.onExit(({ exitCode }) => {
     cleanup(exitCode);
   });
 
-  // Forward signals to the PTY process
   for (const sig of ['SIGTERM', 'SIGHUP'] as NodeJS.Signals[]) {
     process.on(sig, () => {
       ptyProcess.kill(sig);
     });
   }
 
-  // Safety net: restore terminal on uncaught errors
   process.on('uncaughtException', (err) => {
-    process.stderr.write(`\n[cc-live] fatal: ${err.message}\n`);
+    process.stderr.write(`\n${formatLog(runtime, `fatal: ${err.message}`)}\n`);
     cleanup(1);
   });
 }

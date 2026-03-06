@@ -58,7 +58,7 @@ export function setupViewerHandlers(
     socket.on('input', (data: { sessionId: string; data: string }) => {
       const session = getSession(registry, data.sessionId);
       if (!session) return;
-      // Relay input to the cc-live client via the stream namespace
+      // Relay input to the live client via the stream namespace
       const streamSocket = streamNs.sockets.get(session.streamSocketId);
       if (streamSocket) {
         streamSocket.emit('remote-input', { data: data.data });

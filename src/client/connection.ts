@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { SessionRegistration } from '../shared/types';
+import { ClientRuntime, formatLog } from './runtime';
 
 function getProxyAgent(): HttpsProxyAgent<string> | undefined {
   const proxyUrl =
@@ -21,7 +22,8 @@ export interface Connection {
 export function createConnection(
   serverUrl: string,
   token: string,
-  sessionId: string
+  sessionId: string,
+  runtime: Pick<ClientRuntime, 'debug' | 'logPrefix'>
 ): Connection {
   const agent = getProxyAgent();
   const socket = io(`${serverUrl}/stream`, {
@@ -35,20 +37,32 @@ export function createConnection(
   });
 
   const conn: Connection = { socket, sessionId, connected: false };
-  const debug = !!process.env.CC_LIVE_DEBUG;
+  const debug = runtime.debug;
   let errorCount = 0;
 
-  if (debug) process.stderr.write(`\x1b[90m[cc-live] connecting to ${serverUrl}...\x1b[0m\n`);
+  if (debug) {
+    process.stderr.write(
+      `\x1b[90m${formatLog(runtime, `connecting to ${serverUrl}...`)}\x1b[0m\n`
+    );
+  }
 
   socket.on('connect', () => {
     conn.connected = true;
     errorCount = 0;
-    if (debug) process.stderr.write(`\x1b[32m[cc-live] connected (session ${sessionId.slice(0, 8)})\x1b[0m\n`);
+    if (debug) {
+      process.stderr.write(
+        `\x1b[32m${formatLog(runtime, `connected (session ${sessionId.slice(0, 8)})`)}\x1b[0m\n`
+      );
+    }
   });
 
   socket.on('disconnect', (reason: string) => {
     conn.connected = false;
-    if (debug) process.stderr.write(`\x1b[33m[cc-live] disconnected: ${reason}\x1b[0m\n`);
+    if (debug) {
+      process.stderr.write(
+        `\x1b[33m${formatLog(runtime, `disconnected: ${reason}`)}\x1b[0m\n`
+      );
+    }
   });
 
   socket.on('connect_error', (err: Error) => {
@@ -56,7 +70,7 @@ export function createConnection(
     errorCount++;
     if (debug && (errorCount <= 3 || errorCount % 10 === 0)) {
       process.stderr.write(
-        `\x1b[33m[cc-live] connection error (attempt ${errorCount}): ${err.message}\x1b[0m\n`
+        `\x1b[33m${formatLog(runtime, `connection error (attempt ${errorCount}): ${err.message}`)}\x1b[0m\n`
       );
     }
   });
