@@ -7,6 +7,7 @@ import {
   sendResize,
   onRemoteInput,
   disconnect,
+  flushPendingOutput,
 } from './connection';
 import { ClientConfig } from '../shared/types';
 import { ClientRuntime, createLaunchError, formatLog } from './runtime';
@@ -64,6 +65,7 @@ export async function startProxy(
       cols: process.stdout.columns || cols,
       rows: process.stdout.rows || rows,
     });
+    flushPendingOutput(conn);
   });
 
   process.stdin.on('data', (data: Buffer) => {

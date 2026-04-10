@@ -17,6 +17,7 @@ export interface Connection {
   socket: Socket;
   sessionId: string;
   connected: boolean;
+  pendingBuffer: string[];
 }
 
 export function createConnection(
@@ -36,7 +37,7 @@ export function createConnection(
     ...(agent && { extraHeaders: {}, agent: agent as never }),
   });
 
-  const conn: Connection = { socket, sessionId, connected: false };
+  const conn: Connection = { socket, sessionId, connected: false, pendingBuffer: [] };
   const debug = runtime.debug;
   let errorCount = 0;
 
@@ -91,7 +92,16 @@ export function sendRegister(
 export function sendOutput(conn: Connection, data: string): void {
   if (conn.connected) {
     conn.socket.volatile.emit('output', { data });
+  } else {
+    conn.pendingBuffer.push(data);
   }
+}
+
+export function flushPendingOutput(conn: Connection): void {
+  if (conn.pendingBuffer.length === 0) return;
+  const buffered = conn.pendingBuffer.splice(0);
+  const merged = buffered.join('');
+  conn.socket.emit('output', { data: merged });
 }
 
 export function sendResize(
